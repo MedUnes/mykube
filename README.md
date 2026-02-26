@@ -47,3 +47,5 @@ Follow The installation steps:
 [02- PKI: certificates generated and distributed](02-certs)
 
 [03- Kubeconfigs: credentials generated and distributed](03-kubeconfig)
+
+[04- etcd Bootstrap: Cluster State Store Installation](04-etcd)
