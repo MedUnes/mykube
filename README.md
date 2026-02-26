@@ -36,8 +36,8 @@ Kubernetes Internal Networks (managed by k8s, not libvirt):
   Service CIDR: 10.96.0.0/24  (254 addresses)
 
 External Access:
-  SSH into VMs via host (NAT) → adminuser@10.0.0.x
-  kubectl from host           → via kubeconfig pointing to 10.0.0.4:6443
+  SSH into VMs via host (NAT) -> adminuser@10.0.0.x
+  kubectl from host           -> via kubeconfig pointing to 10.0.0.4:6443
 ```
 
 Follow The installation steps:

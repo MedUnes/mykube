@@ -6,7 +6,7 @@ set -euo pipefail
 # Runs on the VPS host. Generates configs locally, uploads them, then
 # executes installation steps on control-plane-1 via SSH.
 #
-# Usage: ./bootstrap-etcd.sh
+# Usage: ./bootstrap-apiserver.sh
 # =============================================================================
 
 # --- Environment -----------------------------------------------------------

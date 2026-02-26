@@ -266,15 +266,15 @@ Check `free -h`. You need at least 5GB free before applying. Stop any unnecessar
 The remaining bootstrap order:
 
 ```
-✅ VM: using libvrit and QEMU to create controller and worker nodes
-⬜ PKI: certificates generated and distributed
-⬜ Kubeconfigs: credentials generated and distributed
-⬜ etcd: cluster state store (next)
-⬜ kube-apiserver: the front door
-⬜ kube-controller-manager + kube-scheduler
-⬜ kubelet on worker nodes
-⬜ Cilium CNI
-⬜ kubectl get nodes → all Ready
+✅ 1- VM: using libvrit and QEMU to create controller and worker nodes
+⬜ 2- PKI: certificates generated and distributed
+⬜ 3- Kubeconfigs: credentials generated and distributed
+⬜ 4- etcd: cluster state store 
+⬜ 5- kube-apiserver: the front door
+⬜ 6- kube-controller-manager + kube-scheduler
+⬜ 7- kubelet on worker nodes
+⬜ 8- Cilium CNI
+⬜ 9- kubectl get nodes -> all Ready
 ```
 
 ---

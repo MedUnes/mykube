@@ -22,7 +22,7 @@ component uses to authenticate and where it expects the API server to be.
 A critical decision was made here: **the API server is never addressed by its public IP**.
 
 ```
-Internet → VPS public IP Ex: (190.192.1.2)
+Internet -> VPS public IP Ex: (190.192.1.2)
                 v  NAT
            libvirt bridge (virbr2)
                 v
@@ -174,15 +174,15 @@ bootstrapped. The kubeconfigs are just credentials waiting to be used.
 The remaining bootstrap order:
 
 ```
-✅ VM: using libvrit and QEMU to create controller and worker nodes
-✅ PKI: certificates generated and distributed
-✅ Kubeconfigs: credentials generated and distributed
-⬜ etcd: cluster state store (next)
-⬜ kube-apiserver: the front door
-⬜ kube-controller-manager + kube-scheduler
-⬜ kubelet on worker nodes
-⬜ Cilium CNI
-⬜ kubectl get nodes → all Ready
+✅ 1- VM: using libvrit and QEMU to create controller and worker nodes
+✅ 2- PKI: certificates generated and distributed
+✅ 3- Kubeconfigs: credentials generated and distributed
+⬜ 4- etcd: cluster state store 
+⬜ 5- kube-apiserver: the front door
+⬜ 6- kube-controller-manager + kube-scheduler
+⬜ 7- kubelet on worker nodes
+⬜ 8- Cilium CNI
+⬜ 9- kubectl get nodes -> all Ready
 ```
 
 ---
