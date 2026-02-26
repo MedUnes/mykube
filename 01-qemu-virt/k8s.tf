@@ -192,3 +192,4 @@ resource "libvirt_domain" "kubernetes_nodes" {
   }
 }
 
+

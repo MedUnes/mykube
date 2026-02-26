@@ -1,4 +1,4 @@
-# PKI Certificate Generation
+# 02- PKI Certificate Generation
 
 ## Why Manual PKI Instead of kubeadm?
 
@@ -172,7 +172,7 @@ every possible address it will be reached at:
 ```
 10.0.0.4                              # internal VM IP
 control-plane-1                       # hostname
-82.165.68.237                         # VPS public IP (for kubectl from outside)
+1.2.3.4                               # VPS public IP (for kubectl from outside, this is a fake value here)
 10.0.0.1                              # bridge/gateway IP
 10.96.0.1                             # first IP of Service CIDR (kubernetes.default service)
 127.0.0.1                             # localhost
@@ -231,7 +231,22 @@ Workers only get what they need, they never see the CA private key or the apiser
 
 ---
 
+The remaining bootstrap order:
+
+```
+✅ VM: using libvrit and QEMU to create controller and worker nodes
+✅ PKI: certificates generated and distributed
+⬜ Kubeconfigs: credentials generated and distributed
+⬜ etcd: cluster state store (next)
+⬜ kube-apiserver: the front door
+⬜ kube-controller-manager + kube-scheduler
+⬜ kubelet on worker nodes
+⬜ Cilium CNI
+⬜ kubectl get nodes → all Ready
+```
+
+---
+
 ## Next Step
 
-With PKI complete, generate **kubeconfigs**, one per component, which bundle the certificates with the API server
-address so each component knows both *where* to connect and *who it is*.
+[Kubeconfigs: credentials generated and distributed](../03-kubeconfig)
