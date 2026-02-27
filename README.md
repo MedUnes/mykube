@@ -49,3 +49,13 @@ Follow The installation steps:
 [03- Kubeconfigs: credentials generated and distributed](03-kubeconfig)
 
 [04- etcd Bootstrap: Cluster State Store Installation](04-etcd)
+
+[05- kube-apiserver Bootstrap](05-apiserver)
+
+[06- Controller Manager & Scheduler Bootstrap](06-controller-manager-scheduler)
+
+[07- Worker Node Bootstrap (Kubelet)](07-kubelets)
+
+[08- Cilium CNI](08-cillium)
+
+[09- CoreDNS](09-coredns)
