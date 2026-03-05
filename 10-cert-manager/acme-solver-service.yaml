@@ -1,0 +1,26 @@
+# Fixed Service that always selects the active cert-manager HTTP-01 solver pod.
+#
+# cert-manager labels every solver pod with:
+#   acme.cert-manager.io/http01-solver=true
+#
+# This Service uses that label as its selector so nginx (inside the cluster)
+# can always proxy /.well-known/acme-challenge/ to a stable DNS name:
+#   acme-solver.cert-manager.svc.cluster.local:8089
+#
+# When no challenge is active the Service has no endpoints — nginx returns
+# 502 for challenge requests, which is correct (no challenge = no request).
+#
+# Applied once during bootstrap-certmanager.sh. Never needs updating.
+apiVersion: v1
+kind: Service
+metadata:
+  name: acme-solver
+  namespace: cert-manager
+spec:
+  selector:
+    acme.cert-manager.io/http01-solver: "true"
+  ports:
+    - name: http
+      port: 8089
+      targetPort: 8089
+  type: ClusterIP

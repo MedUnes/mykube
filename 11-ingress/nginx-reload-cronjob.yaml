@@ -1,0 +1,64 @@
+# nginx reload CronJob
+#
+# cert-manager renews TLS certs by updating the Kubernetes Secret.
+# Kubernetes syncs updated Secrets into mounted pod volumes within ~60s.
+# nginx does not watch cert files — it only picks them up on SIGHUP.
+# This CronJob sends nginx -s reload every 12h so renewed certs are applied.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: nginx-reload
+  namespace: ingress
+spec:
+  schedule: "0 */12 * * *"
+  concurrencyPolicy: Forbid
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          serviceAccountName: nginx-reloader
+          restartPolicy: OnFailure
+          containers:
+            - name: reload
+              image: bitnami/kubectl:latest
+              command:
+                - /bin/sh
+                - -c
+                - |
+                  POD=$(kubectl get pod -n ingress -l app=nginx-ingress \
+                    -o jsonpath='{.items[0].metadata.name}')
+                  kubectl exec -n ingress $POD -- nginx -s reload
+                  echo "[+] nginx reloaded in $POD"
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: nginx-reloader
+  namespace: ingress
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: nginx-reloader
+  namespace: ingress
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list"]
+  - apiGroups: [""]
+    resources: ["pods/exec"]
+    verbs: ["create"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: nginx-reloader
+  namespace: ingress
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: nginx-reloader
+subjects:
+  - kind: ServiceAccount
+    name: nginx-reloader
+    namespace: ingress

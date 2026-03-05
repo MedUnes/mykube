@@ -1,0 +1,89 @@
+# nginx base configuration — mounted as /etc/nginx/nginx.conf in the ingress pod.
+# Applied once by bootstrap-ingress.sh. Updated only if nginx version changes.
+#
+# Key properties:
+#   - resolver 10.96.0.10: CoreDNS ClusterIP — resolves service names
+#   - dnsPolicy: ClusterFirstWithHostNet on DaemonSet ensures this works
+#   - ACME challenge proxy: routes /.well-known/acme-challenge/ to cert-manager
+#     solver pod via the fixed 'acme-solver' Service in cert-manager namespace
+#   - include /etc/nginx/sites/*.conf: per-site configs added by new-site.sh
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: nginx-config
+  namespace: ingress
+data:
+  nginx.conf: |
+    worker_processes auto;
+    error_log /var/log/nginx/error.log warn;
+    pid /tmp/nginx.pid;
+
+    events {
+        worker_connections 1024;
+    }
+
+    http {
+        include       /etc/nginx/mime.types;
+        default_type  application/octet-stream;
+
+        log_format main '$remote_addr - $remote_user [$time_local] "$request" '
+                        '$status $body_bytes_sent "$http_referer" '
+                        '"$http_user_agent"';
+
+        access_log /var/log/nginx/access.log main;
+        sendfile   on;
+        keepalive_timeout 65;
+
+        # CoreDNS — resolves Kubernetes Service names.
+        # Works because dnsPolicy: ClusterFirstWithHostNet is set on the DaemonSet.
+        # valid=10s: re-resolve every 10s — pod IPs change on restart.
+        # ipv6=off: cluster is IPv4 only.
+        resolver 10.96.0.10 valid=10s ipv6=off;
+
+        # Shared SSL settings
+        ssl_protocols           TLSv1.2 TLSv1.3;
+        ssl_ciphers             HIGH:!aNULL:!MD5;
+        ssl_session_cache       shared:SSL:10m;
+        ssl_session_timeout     10m;
+        ssl_prefer_server_ciphers on;
+
+        # HTTP server — ACME challenge + redirect to HTTPS
+        server {
+            listen 80 default_server;
+            server_name _;
+
+            # ACME HTTP-01 challenge proxy.
+            # cert-manager solver pod is selected by the fixed 'acme-solver'
+            # Service (cert-manager namespace). When no challenge is active
+            # the Service has no endpoints — returns 502, which is correct.
+            location /.well-known/acme-challenge/ {
+                set $acme_solver acme-solver.cert-manager.svc.cluster.local;
+                proxy_pass http://$acme_solver:8089;
+                proxy_set_header Host $host;
+            }
+
+            # Health check endpoint — used by DaemonSet liveness/readiness probes.
+            # Must return 200 before any site certs exist.
+            location /healthz {
+                return 200 "ok";
+                add_header Content-Type text/plain;
+                access_log off;
+            }
+
+            location / {
+                return 301 https://$host$request_uri;
+            }
+        }
+
+        # Per-site virtual hosts — added by new-site.sh via nginx-sites ConfigMap
+        include /etc/nginx/sites/*.conf;
+    }
+---
+# Empty sites ConfigMap — new-site.sh adds entries here.
+# nginx includes all *.conf files from the mounted directory.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: nginx-sites
+  namespace: ingress
+data: {}

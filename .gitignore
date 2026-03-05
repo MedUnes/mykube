@@ -1,0 +1,5 @@
+.idea
+01-qemu-virt/.terraform.lock.hcl
+01-qemu-virt/.terraform/
+01-qemu-virt/terraform.tfstate
+01-qemu-virt/terraform.tfstate.backup
