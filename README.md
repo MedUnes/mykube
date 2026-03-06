@@ -1,4 +1,4 @@
-# MyKube: Kubernetes The Hard Way, Self-Hosted on QEMU/KVM
+# Kubernetes The Hard Way: Self-Hosted on QEMU/KVM
 
 This repository bootstraps a fully functional Kubernetes cluster from scratch
 on a single VPS using QEMU/KVM virtual machines. Every component is installed
@@ -146,3 +146,107 @@ decisions made at that layer.
 - Terraform
 - A domain with DNS A record pointing to the VPS public IP
 - An email address for Let's Encrypt (phase 10+)
+
+---
+
+## Deploying a Service
+
+Once the cluster is up, deploying a containerized application and serving it
+over HTTPS takes three steps and one yaml file.
+
+### 1. Point DNS to your VPS
+
+Create an A record for your domain pointing to the VPS public IP before
+anything else. Let's Encrypt validates domain ownership over HTTP: it must
+resolve before you request a cert.
+
+### 2. Write app.yaml
+
+A Deployment tells Kubernetes to run your container and keep it alive.
+A Service gives it a stable internal DNS name so nginx can reach it.
+Both go in one file.
+
+```yaml
+# app.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: my-app
+  namespace: default
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: my-app
+  template:
+    metadata:
+      labels:
+        app: my-app
+    spec:
+      containers:
+        - name: my-app
+          image: youruser/yourimage:latest
+          ports:
+            - containerPort: 8000    # port your app listens on inside the container
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: my-app
+  namespace: default
+spec:
+  selector:
+    app: my-app
+  ports:
+    - port: 8000
+      targetPort: 8000
+```
+
+Apply it:
+
+```bash
+kubectl apply -f app.yaml
+kubectl get pods          # wait for Running
+kubectl logs my-app-xxxxx # confirm the app started cleanly
+```
+
+### 3. Run new-site.sh
+
+```bash
+cd 11-ingress
+./new-site.sh --template proxy-pass \
+  --domain app.yourdomain.com \
+  --service my-app \
+  --namespace default \
+  --port 8000
+```
+
+This single command:
+
+- Requests a staging cert to validate the ACME flow (no rate limit cost)
+- Requests a production Let's Encrypt cert
+- Mounts the cert Secret into the nginx ingress pod
+- Generates the nginx virtual host config and adds it to the cluster
+- Reloads nginx
+
+When it finishes, `https://app.yourdomain.com` is live.
+
+### After that
+
+You never touch certificates or nginx again for this domain. cert-manager
+renews the cert automatically before it expires. The nginx-reload CronJob
+picks up renewed certs every 12 hours.
+
+To update your application, change the image tag and reapply:
+
+```bash
+kubectl set image deployment/my-app my-app=youruser/yourimage:v2
+kubectl rollout status deployment/my-app
+```
+
+To remove the site entirely:
+
+```bash
+./new-site.sh --remove --domain app.yourdomain.com
+kubectl delete -f app.yaml
+```

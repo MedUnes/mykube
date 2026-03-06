@@ -1,227 +1,104 @@
-## 01- Prerequisites
+# Phase 01: VM Provisioning
 
-### 1. A Machine Supporting Hardware Virtualization
+## What This Phase Does
 
-Check if your CPU supports KVM:
-
-```bash
-# Intel CPU
-grep -c vmx /proc/cpuinfo
-
-# AMD CPU
-grep -c svm /proc/cpuinfo
-```
-
-Any result greater than `0` means you're good. If you get `0`, your host does not support KVM and the VMs will be too
-slow for Kubernetes.
-
-Also confirm KVM is usable:
-
-```bash
-sudo apt install -y cpu-checker
-sudo kvm-ok
-# Expected output: INFO: /dev/kvm exists: KVM acceleration can be used
-```
-
-### 2. Minimum Host Resources
-
-| Resource  | Minimum       | Recommended  |
-|-----------|---------------|--------------|
-| RAM       | 8 GB          | 16 GB        |
-| CPU cores | 4             | 6+           |
-| Disk      | 60 GB free    | 100 GB       |
-| OS        | Ubuntu 22.04+ | Ubuntu 24.04 |
-
-Check your available resources:
-
-```bash
-free -h
-nproc
-df -h /
-```
-
-### 3. Install QEMU, KVM, and libvirt
-
-```bash
-sudo apt update
-sudo apt install -y \
-  qemu-kvm \
-  libvirt-daemon-system \
-  libvirt-clients \
-  virtinst \
-  bridge-utils \
-  virt-manager
-
-# Add your user to the libvirt and kvm groups
-sudo usermod -aG libvirt $USER
-sudo usermod -aG kvm $USER
-
-# Apply group membership without logging out
-newgrp libvirt
-
-# Start and enable libvirt
-sudo systemctl enable --now libvirtd
-
-# Verify
-sudo virsh version
-sudo virsh list --all
-```
-
-Create the default storage pool (required if it doesn't exist):
-
-```bash
-sudo virsh pool-define-as default dir - - - - /var/lib/libvirt/images
-sudo virsh pool-build default
-sudo virsh pool-start default
-sudo virsh pool-autostart default
-
-# Verify
-sudo virsh pool-list --all
-```
-
-### 4. Install Terraform
-
-```bash
-sudo apt install -y gnupg software-properties-common
-
-wget -O- https://apt.releases.hashicorp.com/gpg | \
-  gpg --dearmor | \
-  sudo tee /usr/share/keyrings/hashicorp-archive-keyring.gpg > /dev/null
-
-echo "deb [signed-by=/usr/share/keyrings/hashicorp-archive-keyring.gpg] \
-  https://apt.releases.hashicorp.com $(lsb_release -cs) main" | \
-  sudo tee /etc/apt/sources.list.d/hashicorp.list
-
-sudo apt update
-sudo apt install -y terraform
-
-# Verify
-terraform version
-```
+Creates three Ubuntu 24.04 virtual machines on the host using QEMU/KVM and
+Terraform. These VMs become the Kubernetes nodes. Everything from phase 02
+onward runs inside them.
 
 ---
 
-## Generate SSH Key Pair
+## Why QEMU/KVM Instead of Cloud VMs
 
-The VMs use SSH key authentication only: no passwords. Generate a dedicated key pair for this cluster:
+The entire cluster runs on a single VPS. QEMU/KVM with libvirt lets you carve
+that machine into multiple isolated VMs with real network separation: the same
+result as renting three cloud instances, without the per-instance cost.
+
+libvirt creates a NAT bridge (`10.0.0.0/24`) that the VMs share. They talk to
+each other over this private network. The host machine acts as the gateway.
+From outside, only the host's public IP is visible.
+
+---
+
+## Why Terraform
+
+The three VMs are identical in structure: same base image, same cloud-init
+config, same network: but with different names, IPs, and resource allocations.
+Terraform expresses this as a single resource block with a count, renders
+cloud-init per node, and provisions everything in one command. Tearing down
+and reprovisioning is equally one command.
+
+---
+
+## What Gets Created
+
+| VM              | IP        | Role                 | vCPU | RAM | Disk |
+|-----------------|-----------|----------------------|------|-----|------|
+| control-plane-1 | 10.0.0.4  | etcd + control plane | 2    | 3GB | 30GB |
+| worker-node-1   | 10.0.0.36 | workloads + ingress  | 1    | 1GB | 30GB |
+| worker-node-2   | 10.0.0.37 | workloads            | 1    | 1GB | 30GB |
+
+All three boot Ubuntu 24.04 via cloud-init with:
+
+- A dedicated user (`adminuser`) with your SSH public key injected
+- Static IPs configured at boot
+- No passwords: SSH key only
+
+---
+
+## Prerequisites
+
+Hardware virtualization must be available on the host:
 
 ```bash
-ssh-keygen -t rsa -b 4096 -f ~/.ssh/id_rsa_k8s_vm -N ""
+egrep -c '(vmx|svm)' /proc/cpuinfo   # must be > 0
+sudo kvm-ok                            # must say KVM acceleration can be used
 ```
 
-This creates:
-
-- `~/.ssh/id_rsa_k8s_vm`: private key (never share this)
-- `~/.ssh/id_rsa_k8s_vm.pub`: public key (injected into VMs via cloud-init)
-
-> **Note:** The Terraform file references `~/.ssh/id_rsa_k8s_vm.pub` by default. Either generate your key with that
-> name, or update the `user_data` block in `k8s.tf` to point to your key path.
+Minimum host resources: 6GB RAM, 4 CPU cores, 60GB free disk.
 
 ---
 
-## Project Structure
+## Scripts
 
-```
-k8s/
-└── k8s.tf       # Single Terraform file: all infrastructure defined here
-```
+### `setup.sh`
 
----
-
-## What Terraform Creates
-
-In a single `terraform apply`, the following resources are provisioned:
-
-| Resource                              | Description                                       |
-|---------------------------------------|---------------------------------------------------|
-| `libvirt_volume.ubuntu_noble`         | Ubuntu 24.04 base image (downloaded once, shared) |
-| `libvirt_network.kubernetes_network`  | NAT bridge network at 10.0.0.0/24                 |
-| `libvirt_volume.node_disk[*]`         | 3x 30GB qcow2 disks backed by base image          |
-| `libvirt_cloudinit_disk.node_init[*]` | 3x cloud-init ISOs (user, network, meta config)   |
-| `libvirt_domain.kubernetes_nodes[*]`  | 3x KVM virtual machines, started automatically    |
-
----
-
-## Build the Cluster
-
-### Step 1: Clone and enter the directory
+Installs and configures everything the host needs before Terraform can run:
+QEMU/KVM, libvirt, the Terraform binary, the libvirt storage pool, and the
+SSH key pair (`~/.ssh/id_rsa_k8s_vm`). Run once on a fresh host.
 
 ```bash
-git clone https://github.com/medunes/mykube.git
-cd k8s-libvirt
+sudo ./setup.sh
 ```
 
-### Step 2: Update the SSH key path (if needed)
+### `k8s.tf`
 
-Open `k8s.tf` and find this line in the `user_data` block:
-
-```hcl
-- ${file(pathexpand("~/.ssh/id_rsa_k8s_vm.pub"))}
-```
-
-Change it to match your key:
-
-```hcl
-- ${file(pathexpand("~/.ssh/id_rsa_k8s_vm.pub"))}
-```
-
-### Step 3: Initialize and apply
+Terraform manifest. Defines the libvirt network, base image volume, per-node
+disks, cloud-init ISOs, and VM domains. All node differences are expressed
+through a locals map: no copy-paste between nodes.
 
 ```bash
 terraform init
-terraform plan
 terraform apply
 ```
 
-Terraform will download the Ubuntu 24.04 cloud image (~600MB on first run), create all disks, configure cloud-init, and
-start all 3 VMs automatically.
+After apply, wait ~60 seconds for cloud-init to finish before moving to
+phase 02.
 
-### Step 4: Wait for cloud-init
+---
 
-Give the VMs ~60 seconds to finish booting and running cloud-init:
-
-```bash
-sleep 60
-```
-
-### Step 5: Verify VMs are running
+## Verify
 
 ```bash
 sudo virsh list --all
-#  Id   Name              State
-#  ---------------------------------
-#   1   control-plane-1   running
-#   2   worker-node-1     running
-#   3   worker-node-2     running
+# control-plane-1   running
+# worker-node-1     running
+# worker-node-2     running
+
+ssh -i ~/.ssh/id_rsa_k8s_vm adminuser@10.0.0.4    # control plane
+ssh -i ~/.ssh/id_rsa_k8s_vm adminuser@10.0.0.36   # worker 1
+ssh -i ~/.ssh/id_rsa_k8s_vm adminuser@10.0.0.37   # worker 2
 ```
-
----
-
-## SSH Into the Nodes
-
-```bash
-# Control plane
-ssh -i ~/.ssh/id_rsa_k8s_vm adminuser@10.0.0.4
-
-# Worker node 1
-ssh -i ~/.ssh/id_rsa_k8s_vm adminuser@10.0.0.36
-
-# Worker node 2
-ssh -i ~/.ssh/id_rsa_k8s_vm adminuser@10.0.0.37
-```
-
-> The VMs are on a libvirt NAT network. They are reachable directly from the host machine. If you need access from
-> outside the host, set up an SSH tunnel or port forward through the host.
-
-If you reprovision and get a host key warning:
-
-```bash
-ssh-keygen -f ~/.ssh/known_hosts -R '10.0.0.4'
-ssh-keygen -f ~/.ssh/known_hosts -R '10.0.0.36'
-ssh-keygen -f ~/.ssh/known_hosts -R '10.0.0.37'
-```
-
----
 
 ## Tear Down
 
@@ -229,58 +106,11 @@ ssh-keygen -f ~/.ssh/known_hosts -R '10.0.0.37'
 terraform destroy
 ```
 
-This removes all VMs, disks, and the network. The libvirt storage pool and the host OS are untouched.
-
----
-
-## Next Steps
-
-With 3 running Ubuntu 24.04 nodes, you're ready to bootstrap Kubernetes:
-
-1. Install `containerd` on all nodes
-2. Install `kubeadm`, `kubelet`, `kubectl` on all nodes
-3. Run `kubeadm init` on `control-plane-1`
-4. Run `kubeadm join` on both worker nodes
-5. Install a CNI plugin (Flannel or Calico)
-6. Verify with `kubectl get nodes`
-
----
-
-## Troubleshooting
-
-**VMs stuck at shut off after apply**
-Make sure `running = true` is set in the `libvirt_domain` resource in `k8s.tf`.
-
-**Storage pool not found**
-Run the pool creation commands in the Prerequisites section above.
-
-**SSH connection refused right after apply**
-Cloud-init is still running. Wait 60 seconds and try again.
-
-**Host key changed warning after reprovision**
-Expected: the VM got a new identity. Run the `ssh-keygen -R` commands shown above.
-
-**Not enough memory**
-Check `free -h`. You need at least 5GB free before applying. Stop any unnecessary services on the host first.
-
-The remaining bootstrap order:
-
-```
-✅ 1- Preparation: Terraform provisions 3 VMs via QEMU/KVM
-⬜ 2- PKI: certificates generated and distributed
-⬜ 3- Kubeconfigs: credentials generated and distributed
-⬜ 4- etcd: cluster state store 
-⬜ 5- kube-apiserver: the front door
-⬜ 6- kube-controller-manager + kube-scheduler
-⬜ 7- kubelet on nodes
-⬜ 8- Cilium CNI
-⬜ 9- CoreDNS
-⬜ 10- Cert Manager
-⬜ 11- Ingress
-```
+Removes all VMs, disks, and the network. The host OS and storage pool are
+untouched. Re-running `terraform apply` gives you three fresh nodes.
 
 ---
 
 ## Next Step
 
-[PKI: certificates generated and distributed](../02-certs)
+[02-certs: PKI and certificate distribution](../02-certs)
